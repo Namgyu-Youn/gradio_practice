@@ -97,3 +97,6 @@ js/storybook/theme.css
 
 # playwright
 .config/playwright/.cache
+
+# ENV
+gradio_env/
