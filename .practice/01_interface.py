@@ -18,7 +18,7 @@ import gradio as gr
 - Outputs-Only : GAN -> 무작위로 생성된 이미지를 출력해주는 방식
 """
 
-def text_repeater(name, num:int):
+def text_repeater(name:str, num:int):
     return name * int(num)
 
 demo = gr.Interface(
