@@ -37,7 +37,6 @@
 	export let show_copy_button = true;
 	export let show_copy_all_button = false;
 	export let sanitize_html = true;
-	export let bubble_full_width = true;
 	export let layout: "bubble" | "panel" = "bubble";
 	export let type: "tuples" | "messages" = "tuples";
 	export let render_markdown = true;
@@ -45,6 +44,7 @@
 	export let autoscroll = true;
 	export let _retryable = false;
 	export let _undoable = false;
+	export let group_consecutive_messages = true;
 	export let latex_delimiters: {
 		left: string;
 		right: string;
@@ -59,6 +59,7 @@
 		clear_status: LoadingStatus;
 		example_select: SelectData;
 		option_select: SelectData;
+		edit: SelectData;
 		retry: UndoRetryData;
 		undo: UndoRetryData;
 		clear: null;
@@ -76,8 +77,10 @@
 	export let like_user_message = false;
 	export let loading_status: LoadingStatus | undefined = undefined;
 	export let height: number | string | undefined;
+	export let resizeable: boolean;
 	export let min_height: number | string | undefined;
 	export let max_height: number | string | undefined;
+	export let editable: "user" | "all" | null = null;
 	export let placeholder: string | null = null;
 	export let examples: ExampleMessage[] | null = null;
 	export let theme_mode: "system" | "light" | "dark";
@@ -92,6 +95,7 @@
 	{scale}
 	{min_width}
 	{height}
+	{resizeable}
 	{min_height}
 	{max_height}
 	allow_overflow={true}
@@ -126,8 +130,10 @@
 			{show_copy_all_button}
 			value={_value}
 			{latex_delimiters}
+			display_consecutive_in_same_bubble={group_consecutive_messages}
 			{render_markdown}
 			{theme_mode}
+			{editable}
 			pending_message={loading_status?.status === "pending"}
 			generating={loading_status?.status === "generating"}
 			{rtl}
@@ -147,9 +153,20 @@
 				gradio.dispatch("clear");
 			}}
 			on:copy={(e) => gradio.dispatch("copy", e.detail)}
+			on:edit={(e) => {
+				if (value === null || value.length === 0) return;
+				if (type === "messages") {
+					//@ts-ignore
+					value[e.detail.index].content = e.detail.value;
+				} else {
+					//@ts-ignore
+					value[e.detail.index[0]][e.detail.index[1]] = e.detail.value;
+				}
+				value = value;
+				gradio.dispatch("edit", e.detail);
+			}}
 			{avatar_images}
 			{sanitize_html}
-			{bubble_full_width}
 			{line_breaks}
 			{autoscroll}
 			{layout}

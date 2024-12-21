@@ -3,4 +3,4 @@
 "gradio": patch
 ---
 
-fix:Fix sharing on chatbot with spaces
+fix:Some agent low-hanging issues

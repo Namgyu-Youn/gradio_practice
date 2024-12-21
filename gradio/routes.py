@@ -56,7 +56,7 @@ from gradio_client import utils as client_utils
 from gradio_client.documentation import document
 from gradio_client.utils import ServerMessage
 from jinja2.exceptions import TemplateNotFound
-from multipart.multipart import parse_options_header
+from python_multipart.multipart import parse_options_header
 from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from starlette.responses import RedirectResponse
@@ -76,7 +76,7 @@ from gradio.data_classes import (
     SimplePredictBody,
     UserProvidedPath,
 )
-from gradio.exceptions import InvalidPathError
+from gradio.exceptions import Error, InvalidPathError
 from gradio.node_server import (
     start_node_server,
 )
@@ -371,6 +371,7 @@ class App(FastAPI):
                     and not path.startswith("/static")
                     and not path.startswith("/login")
                     and not path.startswith("/logout")
+                    and not path.startswith("/manifest.json")
                 ):
                     if App.app_port is None:
                         App.app_port = request.url.port or int(
@@ -613,25 +614,23 @@ class App(FastAPI):
                 raise HTTPException(
                     status_code=404, detail="Environment not supported."
                 )
-            config = app.get_blocks().config
-            components = config["components"]
+            components = utils.get_all_components()
             location = next(
-                (item for item in components if item["component_class_id"] == id), None
+                (item for item in components if item.get_component_class_id() == id),
+                None,
             )
             if location is None:
                 raise HTTPException(status_code=404, detail="Component not found.")
 
-            component_instance = app.get_blocks().get_component(location["id"])
-
-            module_name = component_instance.__class__.__module__
+            module_name = location.__module__
             module_path = sys.modules[module_name].__file__
 
-            if module_path is None or component_instance is None:
+            if module_path is None:
                 raise HTTPException(status_code=404, detail="Component not found.")
 
             try:
                 requested_path = utils.safe_join(
-                    component_instance.__class__.TEMPLATE_DIR,
+                    location.TEMPLATE_DIR,
                     UserProvidedPath(f"{type}/{file_name}"),
                 )
             except InvalidPathError:
@@ -998,7 +997,8 @@ class App(FastAPI):
                 )
             except BaseException as error:
                 content = utils.error_payload(error, app.get_blocks().show_error)
-                traceback.print_exc()
+                if not isinstance(error, Error) or error.print_exception:
+                    traceback.print_exc()
                 return JSONResponse(
                     content=content,
                     status_code=500,
@@ -1437,6 +1437,35 @@ class App(FastAPI):
             else:
                 return "User-agent: *\nDisallow: "
 
+        @app.get("/manifest.json")
+        def manifest_json():
+            if not blocks.pwa:
+                raise HTTPException(status_code=404)
+
+            return ORJSONResponse(
+                content={
+                    # NOTE: Required members: https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable#required_manifest_members
+                    "name": app.get_blocks().title or "Gradio",
+                    "icons": [
+                        {
+                            "src": "static/img/logo192.svg",
+                            "sizes": "192x192",
+                            "type": "image/svg+xml",
+                            "purpose": "any",
+                        },
+                        {
+                            "src": "static/img/logo512.svg",
+                            "sizes": "512x512",
+                            "type": "image/svg+xml",
+                            "purpose": "any",
+                        },
+                    ],
+                    "start_url": "./",
+                    "display": "standalone",
+                },
+                media_type="application/manifest+json",
+            )
+
         @router.get("/monitoring", dependencies=[Depends(login_check)])
         async def analytics_login(request: fastapi.Request):
             if not blocks.enable_monitoring:
@@ -1524,6 +1553,7 @@ def mount_gradio_app(
     path: str,
     server_name: str = "0.0.0.0",
     server_port: int = 7860,
+    show_api: bool | None = None,
     app_kwargs: dict[str, Any] | None = None,
     *,
     auth: Callable | tuple[str, str] | list[tuple[str, str]] | None = None,
@@ -1557,6 +1587,7 @@ def mount_gradio_app(
         favicon_path: If a path to a file (.png, .gif, or .ico) is provided, it will be used as the favicon for this gradio app's page.
         show_error: If True, any errors in the gradio app will be displayed in an alert modal and printed in the browser console log. Otherwise, errors will only be visible in the terminal session running the Gradio app.
         max_file_size: The maximum file size in bytes that can be uploaded. Can be a string of the form "<value><unit>", where value is any positive integer and unit is one of "b", "kb", "mb", "gb", "tb". If None, no limit is set.
+        show_api: If False, hides the "Use via API" button on the Gradio interface.
         ssr_mode: If True, the Gradio app will be rendered using server-side rendering mode, which is typically more performant and provides better SEO, but this requires Node 20+ to be installed on the system. If False, the app will be rendered using client-side rendering mode. If None, will use GRADIO_SSR_MODE environment variable or default to False.
         node_server_name: The name of the Node server to use for SSR. If None, will use GRADIO_NODE_SERVER_NAME environment variable or search for a node binary in the system.
         node_port: The port on which the Node server should run. If None, will use GRADIO_NODE_SERVER_PORT environment variable or find a free port.
@@ -1578,6 +1609,8 @@ def mount_gradio_app(
         )
 
     blocks.dev_mode = False
+    if show_api is not None:
+        blocks.show_api = show_api
     blocks.max_file_size = utils._parse_file_size(max_file_size)
     blocks.config = blocks.get_config_file()
     blocks.validate_queue_settings()
